@@ -41,8 +41,31 @@ def rand_err():
         return False
 
 
-def spawn(target, args=()):
+def spawn(target, args=(), wait_exit=False):
     t = Thread(target=target, args=args)
-    t.setDaemon(True)
+    if not wait_exit:
+        t.setDaemon(True)
     t.start()
     return t
+
+
+def recv_http_header(conn):
+    data = conn.recv(2048)
+    buf = b''
+    while data:
+        buf += data
+        if buf.endswith(b'\r\n'):
+            return buf.decode()
+        data = conn.recv(2048)
+
+
+def host_from_header(header):
+    start = header.index('\nHost:') + 7
+    header = header[start:]
+    end = header.index('\n')
+    host = header[:end].strip('\r')
+
+    if ':' in host:
+        end = host.index(':')
+        host = host[:end]
+    return host
