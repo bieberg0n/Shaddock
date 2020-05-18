@@ -1,10 +1,11 @@
+import time
 import socket
 import ssl
+import utils
 from utils import (
 spawn,
 log,
-recv_http_header,
-host_from_header,
+HttpHeader,
 )
 import config
 
@@ -14,20 +15,49 @@ class Shaddock:
         self.port = port
         self.cfgs = cfgs
         self.ssl_ctx = {}
+        self.domain_match_dict = self.make_domain_match_dict()
+        utils.plog(self.domain_match_dict)
         self.default_ssl_ctx = None
 
         for name, cfg in cfgs.items():
             ctx = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
             ctx.load_cert_chain(*cfg['cert'])
             self.ssl_ctx[name] = ctx
+
             if self.default_ssl_ctx is None:
+                ctx.sni_callback = self.sni_callback
                 self.default_ssl_ctx = ctx
 
     def sni_callback(self, conn, name, _):
         ctx = self.ssl_ctx.get(name)
-        if not ctx:
-            ctx = self.default_ssl_ctx
+        if ctx is None:
+            for n, c in self.ssl_ctx.items():
+                if n.startswith('*') and name.endswith(n[1:]):
+                    ctx = c
+                    break
+            else:
+                ctx = self.default_ssl_ctx
         conn.context = ctx
+
+    def make_domain_match_dict(self):
+        d = dict()
+        for name, cfg in self.cfgs.items():
+            ns = name.split('.')
+            utils.list_to_dict(ns, d, cfg)
+
+        return d
+
+    def domain_match(self, name):
+        d = self.domain_match_dict
+        o = d
+        for n in reversed(name.split('.')):
+            new_o = o.get(n)
+            if new_o is None:
+                return o.get('*')
+            else:
+                o = new_o
+        else:
+            return new_o
 
     def relay(self, left, right):
         data = left.recv(1024 * 2)
@@ -38,17 +68,17 @@ class Shaddock:
         right.shutdown(socket.SHUT_RDWR)
 
     def handle(self, conn, addr):
-        header = recv_http_header(conn)
-        log(header)
+        header = HttpHeader.load_from_conn(conn)
+        host = header.args.get('Host', '')
+        if ':' in host:
+            host = host.split(':')[0]
 
-        host = host_from_header(header)
-        if self.cfgs.get(host) is None:
-            up_ip, up_port = '127.0.0.1', 2015
+        log(time.ctime(), header.method, host + header.path)
 
-        else:
-            upstream = self.cfgs[host]['upstream']
-            up_ip, up_port_str = upstream.split(':')
-            up_port = int(up_port_str)
+        cfg = self.domain_match(host)
+        upstream = cfg['upstream']
+        up_ip, up_port_str = upstream.split(':')
+        up_port = int(up_port_str)
 
         right = socket.socket()
         right.connect((up_ip, up_port))
@@ -61,10 +91,12 @@ class Shaddock:
         conn.close()
         right.close()
 
-    def run(self):
-        ctx = list(self.ssl_ctx.values())[0]
-        ctx.sni_callback = self.sni_callback
+    def ssl_wrap_handle(self, conn, addr):
+        ctx = self.default_ssl_ctx
+        conn = ctx.wrap_socket(conn, server_side=True)
+        self.handle(conn, addr)
 
+    def run(self):
         s = socket.socket()
         s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         s.bind(('0.0.0.0', self.port))
@@ -72,14 +104,13 @@ class Shaddock:
 
         while True:
             conn, addr = s.accept()
-            conn = ctx.wrap_socket(conn, server_side=True)
-            spawn(self.handle, (conn, addr))
+            spawn(self.ssl_wrap_handle, (conn, addr))
 
 
 def main():
     for p in config.servers:
         s = Shaddock(p, config.servers[p])
-        spawn(s.run, wait_exit=True)
+        spawn(s.run, daemon=False)
 
 
 if __name__ == '__main__':
