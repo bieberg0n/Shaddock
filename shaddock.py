@@ -69,16 +69,15 @@ class Shaddock:
 
     def handle(self, conn, addr):
         header = HttpHeader.load_from_conn(conn)
-        host = header.args.get('Host', '')
-        if ':' in host:
-            host = host.split(':')[0]
-
+        host, _ = utils.host_to_addr(header.host)
         log(time.ctime(), header.method, host + header.path)
 
         cfg = self.domain_match(host)
-        upstream = cfg['upstream']
-        up_ip, up_port_str = upstream.split(':')
-        up_port = int(up_port_str)
+
+        if cfg.get('x-forward-for'):
+            header.args['X-Forwarded-For'] = addr[0]
+
+        up_ip, up_port = utils.host_to_addr(cfg['upstream'])
 
         right = socket.socket()
         right.connect((up_ip, up_port))

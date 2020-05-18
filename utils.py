@@ -61,6 +61,7 @@ class HttpHeader:
         self.http_type = ''
         self.status_code = ''
         self.args = {}
+        self.host = ''
 
     def recv_http_header_raw(self, conn):
         data = conn.recv(2048)
@@ -87,6 +88,10 @@ class HttpHeader:
         header = HttpHeader()
         data = header.recv_http_header_raw(conn)
         header.load(data)
+
+        host = header.args.get('Host')
+        if host:
+            header.host = host
         return header
 
     def encode(self):
@@ -118,3 +123,13 @@ def _list_to_dict(ls, o, value, d):
     else:
         new_o = o.get(e)
     return _list_to_dict(ls, new_o, value, d)
+
+
+def host_to_addr(host, default_port=80):
+    if ':' in host:
+        h, port_str = host.split(':')
+        port = int(port_str)
+    else:
+        h, port = host, default_port
+
+    return h, port
