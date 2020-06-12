@@ -54,6 +54,11 @@ def spawn(target, args=(), daemon=True):
     return t
 
 
+def del_key(dic, key):
+    if dic.get(key):
+        del dic[key]
+
+
 class HttpHeader:
     def __init__(self):
         self.method = ''
@@ -70,6 +75,7 @@ class HttpHeader:
             buf += data
             if buf.endswith(b'\r\n'):
                 return buf.decode()
+            assert len(buf) < 1024 * 1024
             data = conn.recv(2048)
 
     def load(self, header_str):

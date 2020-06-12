@@ -14,9 +14,13 @@ class Shaddock:
     def __init__(self, port, cfgs):
         self.port = port
         self.cfgs = cfgs
-        self.ssl_ctx = {}
         self.domain_match_dict = self.make_domain_match_dict()
         utils.plog(self.domain_match_dict)
+
+        if not self.ssl_enabled():
+            return
+
+        self.ssl_ctx = {}
         self.default_ssl_ctx = None
 
         for name, cfg in cfgs.items():
@@ -27,6 +31,9 @@ class Shaddock:
             if self.default_ssl_ctx is None:
                 ctx.sni_callback = self.sni_callback
                 self.default_ssl_ctx = ctx
+
+    def ssl_enabled(self):
+        return any([cfg.get('cert') for cfg in self.cfgs.values()])
 
     def sni_callback(self, conn, name, _):
         ctx = self.ssl_ctx.get(name)
@@ -62,6 +69,7 @@ class Shaddock:
     def relay(self, left, right):
         data = left.recv(1024 * 2)
         while data:
+            # log(data)
             right.sendall(data)
             data = left.recv(1024 * 2)
 
@@ -76,6 +84,10 @@ class Shaddock:
 
         if cfg.get('x-forward-for'):
             header.args['X-Forwarded-For'] = addr[0]
+
+        if cfg.get('-'):
+            for arg in cfg['-']:
+                utils.del_key(header.args, arg)
 
         up_ip, up_port = utils.host_to_addr(cfg['upstream'])
 
@@ -103,12 +115,16 @@ class Shaddock:
 
         while True:
             conn, addr = s.accept()
-            spawn(self.ssl_wrap_handle, (conn, addr))
+            if self.ssl_enabled():
+                spawn(self.ssl_wrap_handle, (conn, addr))
+            else:
+                spawn(self.handle, (conn, addr))
 
 
 def main():
     for p in config.servers:
         s = Shaddock(p, config.servers[p])
+        log(p)
         spawn(s.run, daemon=False)
 
 
