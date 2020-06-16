@@ -39,6 +39,18 @@ def recv(conn):
     return b
 
 
+def recv_by_len(conn, length):
+    buf = b''
+    while len(buf) < length:
+        data = conn.recv(length - len(buf))
+        if data == b'':
+            return buf
+        else:
+            buf += data
+
+    return buf
+
+
 def rand_err():
     if debug:
         t = time.time()
@@ -61,22 +73,26 @@ def del_key(dic, key):
 
 class HttpHeader:
     def __init__(self):
+        self.conn = None
         self.method = ''
         self.path = ''
         self.http_type = ''
         self.status_code = ''
         self.args = {}
         self.host = ''
+        self.body = ''
 
     def recv_http_header_raw(self, conn):
-        data = conn.recv(2048)
-        buf = b''
+        data = conn.recv(2048).decode()
+        buf = ''
         while data:
             buf += data
-            if buf.endswith(b'\r\n'):
-                return buf.decode()
+            if '\r\n\r\n' in buf:
+                h, b = buf.split('\r\n\r\n')
+                self.body = b
+                return h
             assert len(buf) < 1024 * 1024
-            data = conn.recv(2048)
+            data = conn.recv(2048).decode()
 
     def load(self, header_str):
         headers_lines = header_str.split('\r\n')
@@ -87,11 +103,16 @@ class HttpHeader:
                 key, value = line.split(': ')[:2]
                 self.args[key] = value
 
-        return self
+        body_len = self.args.get('Content-Length')
+        if body_len:
+            l = int(body_len) - len(self.body)
+            self.body += recv_by_len(self.conn, l).decode()
 
     @staticmethod
     def load_from_conn(conn):
         header = HttpHeader()
+        header.conn = conn
+
         data = header.recv_http_header_raw(conn)
         header.load(data)
 
@@ -103,7 +124,7 @@ class HttpHeader:
     def encode(self):
         top = '{} {} {}\r\n'.format(self.method, self.path, self.http_type)
         body = '\r\n'.join(['{}: {}'.format(k, v) for k, v in self.args.items()])
-        raw = top + body + '\r\n\r\n'
+        raw = top + body + '\r\n\r\n' + self.body
         return raw.encode()
 
 
