@@ -1,0 +1,9 @@
+debug = True
+
+servers = {
+    8080: {
+        'localhost': {
+            'upstream': 'localhost:8000'
+        }
+    }
+}

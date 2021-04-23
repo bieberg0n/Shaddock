@@ -1,36 +1,44 @@
+import os
 import time
+import queue
+import signal
 import socket
 import ssl
+from httpheader import HttpHeader
 import utils
 from utils import (
 spawn,
 log,
-HttpHeader,
+plog,
 )
 import config
 
 
 class Shaddock:
-    def __init__(self, port, cfgs):
-        self.port = port
+    def __init__(self, port, cfgs, reload_sign):
+        self.port: int = port
         self.cfgs = cfgs
-        self.domain_match_dict = self.make_domain_match_dict()
-        utils.plog(self.domain_match_dict)
+        self.reload_sign: queue.Queue = reload_sign
 
-        if not self.ssl_enabled():
-            return
+        self.domain_match_dict = self.make_domain_match_dict()
+        plog(self.domain_match_dict)
 
         self.ssl_ctx = {}
         self.default_ssl_ctx = None
 
-        for name, cfg in cfgs.items():
-            ctx = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
-            ctx.load_cert_chain(*cfg['cert'])
-            self.ssl_ctx[name] = ctx
+    def load_ssl_ctxs(self):
+        log('load ssl ctxs')
+        if not self.ssl_enabled():
+            return
 
-            if self.default_ssl_ctx is None:
-                ctx.sni_callback = self.sni_callback
-                self.default_ssl_ctx = ctx
+        self.ssl_ctx = {name: self.load_ssl_ctx_from_cfg(cfg) for name, cfg in self.cfgs.items()}
+        self.default_ssl_ctx = self.ssl_ctx.values()[0]
+        self.default_ssl_ctx.sni_callback = self.sni_callback
+
+    def load_ssl_ctx_from_cfg(self, cfg):
+        ctx = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
+        ctx.load_cert_chain(*cfg['cert'])
+        return ctx
 
     def ssl_enabled(self):
         return any([cfg.get('cert') for cfg in self.cfgs.values()])
@@ -69,7 +77,6 @@ class Shaddock:
     def relay(self, left, right):
         data = left.recv(1024 * 2)
         while data:
-            # log(data)
             right.sendall(data)
             data = left.recv(1024 * 2)
 
@@ -115,17 +122,44 @@ class Shaddock:
 
         while True:
             conn, addr = s.accept()
+
+            if not self.reload_sign.empty():
+                self.reload_sign.get()
+                self.load_ssl_ctxs()
+
             if self.ssl_enabled():
                 spawn(self.ssl_wrap_handle, (conn, addr))
             else:
                 spawn(self.handle, (conn, addr))
 
 
+class Supervisor:
+    def __init__(self):
+        self.sign_queues: [queue.Queue] = []
+        signal.signal(signal.SIGUSR1, self.handle_SIGUSR1)
+
+    def handle_SIGUSR1(self, _signum, _frame):
+        log('receive reload sign!')
+        for q in self.sign_queues:
+            q.put(True)
+
+    def run(self):
+        pid = os.getpid()
+        log('my PID:', pid)
+        with open('pid.txt', 'w') as f:
+            f.write(str(pid))
+
+        for p in config.servers:
+            q = queue.Queue()
+            self.sign_queues.append(q)
+            s = Shaddock(p, config.servers[p], q)
+            log('listen on:', p)
+            spawn(s.run, daemon=False)
+
+
 def main():
-    for p in config.servers:
-        s = Shaddock(p, config.servers[p])
-        log(p)
-        spawn(s.run, daemon=False)
+    supervisor = Supervisor()
+    supervisor.run()
 
 
 if __name__ == '__main__':
