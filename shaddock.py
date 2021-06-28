@@ -27,6 +27,7 @@ class Shaddock:
 
         self.ssl_ctx = {}
         self.default_ssl_ctx = None
+        self.load_ssl_ctxs()
 
     def load_ssl_ctxs(self):
         log('load ssl ctxs')
@@ -34,7 +35,7 @@ class Shaddock:
             return
 
         self.ssl_ctx = {name: self.load_ssl_ctx_from_cfg(cfg) for name, cfg in self.cfgs.items()}
-        self.default_ssl_ctx = self.ssl_ctx.values()[0]
+        self.default_ssl_ctx = list(self.ssl_ctx.values())[0]
         self.default_ssl_ctx.sni_callback = self.sni_callback
 
     def load_ssl_ctx_from_cfg(self, cfg):
