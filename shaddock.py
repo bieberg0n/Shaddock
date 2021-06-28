@@ -5,6 +5,8 @@ import signal
 import socket
 import ssl
 from httpheader import HttpHeader
+from url import URL, Protocol
+from context import Context
 import utils
 from utils import (
 spawn,
@@ -62,10 +64,10 @@ class Shaddock:
 
         return d
 
-    def domain_match(self, name):
+    def cfg_by_domain(self, domain):
         d = self.domain_match_dict
         o = d
-        for n in reversed(name.split('.')):
+        for n in reversed(domain.split('.')):
             new_o = o.get(n)
             if new_o is None:
                 return o.get('*')
@@ -82,32 +84,44 @@ class Shaddock:
 
         right.shutdown(socket.SHUT_RDWR)
 
-    def handle(self, conn, addr):
-        header = HttpHeader.load_from_conn(conn)
-        host, _ = utils.host_to_addr(header.host)
-        log(time.ctime(), header.method, host + header.path)
-
-        cfg = self.domain_match(host)
+    def process_header(self, ctx: Context):
+        host_url = URL(ctx.header.host)
+        cfg = self.cfg_by_domain(host_url.host)
+        ctx.cfg = cfg
 
         if cfg.get('x-forward-for'):
-            header.args['X-Forwarded-For'] = addr[0]
+            ctx.header.args['X-Forwarded-For'] = ctx.src_addr[0]
 
         if cfg.get('-'):
             for arg in cfg['-']:
-                utils.del_key(header.args, arg)
+                utils.del_key(ctx.header.args, arg)
 
-        up_ip, up_port = utils.host_to_addr(cfg['upstream'])
+    def forward(self, ctx):
+        up_url = URL(ctx.cfg['upstream'])
 
-        right = socket.socket()
-        right.connect((up_ip, up_port))
-        right.sendall(header.encode())
+        if up_url.protocol == Protocol.unix:
+            right_conn = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            right_conn.connect(up_url.host)
+        else:
+            right_conn = socket.socket()
+            right_conn.connect((up_url.host, up_url.port))
+        right_conn.sendall(ctx.header.encode())
 
-        t = spawn(self.relay, (conn, right))
-        self.relay(right, conn)
+        t = spawn(self.relay, (ctx.left_conn, right_conn))
+        self.relay(right_conn, ctx.left_conn)
         t.join()
 
-        conn.close()
-        right.close()
+        ctx.left_conn.close()
+        right_conn.close()
+
+    def handle(self, left_conn, addr):
+        ctx = Context(left_conn=left_conn, src_addr=addr)
+
+        ctx.header = HttpHeader.load_from_conn(left_conn)
+        log(time.ctime(), ctx.header.method, ctx.header.host + ctx.header.path)
+
+        self.process_header(ctx)
+        self.forward(ctx)
 
     def ssl_wrap_handle(self, conn, addr):
         ctx = self.default_ssl_ctx

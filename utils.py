@@ -18,6 +18,13 @@ def info(*args):
     print(*args)
 
 
+def removeprefix(string: str, prefix: str):
+    if string.startswith(prefix):
+        return string[len(prefix):]
+    else:
+        return string
+
+
 def recv(conn):
     buf = b''
     while True:
@@ -93,13 +100,3 @@ def _list_to_dict(ls, o, value, d):
     else:
         new_o = o.get(e)
     return _list_to_dict(ls, new_o, value, d)
-
-
-def host_to_addr(host, default_port=80):
-    if ':' in host:
-        h, port_str = host.split(':')
-        port = int(port_str)
-    else:
-        h, port = host, default_port
-
-    return h, port
