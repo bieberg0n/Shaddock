@@ -35,7 +35,7 @@ class HttpHeader:
 
         body_len = self.args.get('Content-Length')
         if body_len:
-            length = int(body_len) - len(self.body)
+            length = int(body_len) - len(self.body.encode())
             self.body += utils.recv_by_len(self.conn, length).decode()
 
     @staticmethod
