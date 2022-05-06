@@ -9,9 +9,11 @@ from url import URL, Protocol
 from context import Context
 import utils
 from utils import (
-spawn,
-log,
-plog,
+    spawn,
+    log,
+    plog,
+    info,
+    pinfo,
 )
 import config
 
@@ -23,7 +25,7 @@ class Shaddock:
         self.reload_sign: queue.Queue = reload_sign
 
         self.domain_match_dict = self.make_domain_match_dict()
-        plog(self.domain_match_dict)
+        pinfo(self.domain_match_dict)
 
         self.ssl_ctx = {}
         self.default_ssl_ctx = None
@@ -119,7 +121,7 @@ class Shaddock:
         ctx = Context(left_conn=left_conn, src_addr=addr)
 
         ctx.header = HttpHeader.load_from_conn(left_conn)
-        log(time.ctime(), ctx.header.method, ctx.header.host + ctx.header.path)
+        info(f'{addr[0]}:{addr[1]}', ctx.header.method, ctx.header.host + ctx.header.path)
 
         self.process_header(ctx)
         self.forward(ctx)
@@ -168,7 +170,7 @@ class Supervisor:
             q = queue.Queue()
             self.sign_queues.append(q)
             s = Shaddock(p, config.servers[p], q)
-            log('listen on:', p)
+            info('listen on:', p)
             spawn(s.run, daemon=False)
 
 

@@ -15,7 +15,14 @@ def plog(*args):
 
 
 def info(*args):
-    print(*args)
+    if debug:
+        print(time.ctime(), *args)
+    else:
+        print(*args)
+
+
+def pinfo(*args):
+    pprint(*args)
 
 
 def removeprefix(string: str, prefix: str):
