@@ -132,9 +132,14 @@ class Shaddock:
         self.handle(conn, addr)
 
     def run(self):
-        s = socket.socket()
+        # s = socket.socket()
+        # s.bind(('0.0.0.0', self.port))
+        addr = ('', self.port)  # all interfaces, port 8080
+        if socket.has_dualstack_ipv6():
+            s = socket.create_server(addr, family=socket.AF_INET6, dualstack_ipv6=True)
+        else:
+            s = socket.create_server(addr)
         s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        s.bind(('0.0.0.0', self.port))
         s.listen(5)
 
         while True:
